@@ -158,7 +158,7 @@ if __name__ == "__main__":
     name = "MBSNetwork"
     network = create_network_from_alignments(
         alignment_files=list(config.directory.alignments.glob("*.npy")),
-        threshold=0.8,
+        threshold=1,
         name=name,
         remove_isolated=False,
         to_alignment_file=None,
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     print(f"Number of edges: {network.number_of_edges()} edges")
     network = create_network_from_alignments(
         alignment_files=list(config.directory.alignments.glob("*.npy")),
-        threshold=0.8,
+        threshold=1,
         name=name,
         remove_isolated=False,
         to_alignment_file=next(

@@ -5,11 +5,13 @@ import logging
 import os
 import time
 from typing import TYPE_CHECKING, Any
+from config import config
 
 import numpy as np
 import open3d  # type: ignore[import-untyped]
 from joblib import Parallel, delayed  # type: ignore[import-untyped]
 from logger import configure_queue_listener, configure_worker_logger
+import networkx as nx
 
 from alignment.util import (
     combination_within_interval,
@@ -17,6 +19,7 @@ from alignment.util import (
     get_loss_function,
     interval_split,
     split_into_sublists,
+    get_mbs_neighbors,
 )
 
 if TYPE_CHECKING:
@@ -198,6 +201,27 @@ class PairwiseAligner:
         return all_alignments
 
 
+def configure_icp_params(config: AlignmentConfig) -> None:
+    """Derive config's open3d ICP objects (transformation_estimation, criteria_*,
+    finetune_number) from its plain settings (loss_function, max_coarse_iterations,
+    etc.). align_point_clouds needs these set; pairwise_alignment does this once
+    up front for a whole batch, but any other caller must do it too.
+    """
+    loss_function = get_loss_function(config)
+    config.transformation_estimation = (
+        open3d.pipelines.registration.TransformationEstimationForGeneralizedICP(
+            1.0, loss_function
+        )
+    )
+    config.criteria_coarse = open3d.pipelines.registration.ICPConvergenceCriteria(
+        max_iteration=config.max_coarse_iterations
+    )
+    config.criteria_finetune = open3d.pipelines.registration.ICPConvergenceCriteria(
+        max_iteration=config.max_finetune_iterations
+    )
+    config.finetune_number = int(config.coarse_alignments * config.top_ranking_fraction)
+
+
 def align_point_clouds(
     source: MBSPointCloud,
     target: MBSPointCloud,
@@ -205,6 +229,9 @@ def align_point_clouds(
     return_transformation: bool = False,
 ):
     """Align two point clouds using ICP and return the RMSD and, optionally, the transformation."""
+    if config.transformation_estimation is None:
+        configure_icp_params(config)
+
     best_initial_rmsds = np.ones(config.finetune_number) * 1000.0
     best_initial_targets: list[MBSPointCloud] = [
         None for _ in range(config.finetune_number)
@@ -276,6 +303,134 @@ def align_point_clouds(
     return final_rmsd
 
 
+def simulation_alignment(
+        simulation_frames: list[MBSPointCloud],
+        target:MBSPointCloud,
+        config:AlignmentConfig,
+        init_transform=None,
+
+):
+    """Perform local alignment on all simulation frames 
+    in relation to the given target site"""
+
+
+    """Pseudocode:
+    - retrieve neighboring sites from MBS_network
+    - Do thorough simulation of the first alignment if not given.
+    - Save the last transformation. 
+    - Do a simple alignment on the next fram, using the last transformation as a target.
+    - Return the original
+    """
+
+    if init_transform is None:
+        init_rmsd, init_transform = align_point_clouds(
+        simulation_frames[0],
+        target,
+        config,
+        True)
+    else:
+        init_rmsd = evaluate_alignment()
+    # Fine-tune best alignments
+    final_rmsd = init_rmsd
+    best_full_transformation = init_transform
+    print("amount of frames to compare: ",len(simulation_frames))
+    for i in range(1, len(simulation_frames)):
+        source = simulation_frames[i]
+        transformed_source = copy.deepcopy(source)
+        transformed_source.transform(init_transform)
+
+        finetuned_alignment = (
+            open3d.pipelines.registration.registration_generalized_icp(
+                transformed_source.point_cloud,
+                target.point_cloud,
+                config.max_correspondence_distance,
+                estimation_method=config.transformation_estimation,
+                criteria=config.criteria_finetune,
+            )
+        )
+
+        transformed_source.transform(finetuned_alignment.transformation)
+        rmsd = evaluate_alignment(
+            transformed_source, target, config.rmsd_ignore_threshold
+        )
+        if rmsd < final_rmsd:
+            final_rmsd = rmsd
+            # Combine coarse + fine + initial rotation
+            T_coarse = init_transform
+            T_full = T_coarse @ finetuned_alignment.transformation
+            best_full_transformation = T_full
+
+        
+    return final_rmsd
+
+def simulation_alignment_from_node(
+        network: nx.Graph,
+        node: int,
+        config: AlignmentConfig,
+        threshold: float
+
+):
+        """
+        Re-evaluates the network at the given node, using a short simulation. 
+        Only re-evaluates the immediate neighbors of the given node.
+        """
+        node = network.nodes[node]
+        dp_id = node["pdb_entry"]
+
+def network_based_pairwise_alignment(
+    network: nx.Graph,
+    mbss: list[MetalBindingSite],
+    simulation_frames_by_node: dict[int, list[MBSPointCloud]],
+    config: AlignmentConfig,
+    threshold: float,
+) -> nx.Graph:
+    """Re-evaluate and prune network edges using simulation-based alignment.
+
+    For each node that has simulation frames available, re-evaluate the rmsd
+    of its edges that currently exceed `threshold` via `simulation_alignment`,
+    keeping the lower of the original and re-evaluated rmsd. Afterwards,
+    remove all edges whose rmsd is still above `threshold`. Checks both ways,
+      i.e. both simulation from node u to target v, and node v to target u.
+    """
+
+    """
+    Pseudocode:
+    takes a series of 
+    """
+    mbs_by_id = {mbs.id: mbs for mbs in mbss}
+
+    for node in network.nodes():
+        simulation_frames = simulation_frames_by_node.get(node) #Replace this with 
+        if not simulation_frames:
+            continue
+
+        for neighbor in list(network.neighbors(node)):
+            edge_attrs = network.edges[node, neighbor]
+            og_rmsd = edge_attrs.get("rmsd")
+
+            if og_rmsd is None or og_rmsd <= threshold:
+                continue  # already a good alignment, no need to re-evaluate
+
+            target = MBSPointCloud.from_mbs(mbs_by_id[neighbor])
+            rmsd, _ = simulation_alignment(simulation_frames, target, config)
+
+            if rmsd < og_rmsd:
+                edge_attrs["rmsd"] = rmsd
+
+    edges_to_remove = [
+        (u, v)
+        for u, v, rmsd in network.edges(data="rmsd")
+        if rmsd is not None and rmsd > threshold
+    ]
+    network.remove_edges_from(edges_to_remove)
+
+    return network
+
+
+def get_nodes_for_realignment():
+    """Searches for the best nodes to do additional simulation and steps"""
+    
+
 def pairwise_alignment(
     mbss: list[MetalBindingSite],
     interval: tuple[int, int] | None,
@@ -298,20 +453,8 @@ def pairwise_alignment(
     point_clouds = [MBSPointCloud.from_mbs(mbs) for mbs in mbss]
 
     # Set up the ICP registration parameters
-    loss_function = get_loss_function(config)
     worker_path = config.path / f"alignment-worker-{worker}.npz"
-    config.transformation_estimation = (
-        open3d.pipelines.registration.TransformationEstimationForGeneralizedICP(
-            1.0, loss_function
-        )
-    )
-    config.criteria_coarse = open3d.pipelines.registration.ICPConvergenceCriteria(
-        max_iteration=config.max_coarse_iterations
-    )
-    config.criteria_finetune = open3d.pipelines.registration.ICPConvergenceCriteria(
-        max_iteration=config.max_finetune_iterations
-    )
-    config.finetune_number = int(config.coarse_alignments * config.top_ranking_fraction)
+    configure_icp_params(config)
 
     # Determine pairwise combinations
     if pair_indices is not None:
@@ -360,3 +503,40 @@ def pairwise_alignment(
         if save_flag and logsave_counter % config.save_divisor == 0:
             np.savez(worker_path, alignment_rmsds=alignment_rmsds, rmsd_idx=rmsd_idx)
     return alignment_rmsds
+
+if __name__=="__main__":
+    
+
+    import simulation.simulation as sim
+    print("Starting main", flush=True)
+
+    start_time = time.perf_counter()
+
+    test_enzyme = "4M9E"
+    ref_enzyme = "3VK6"
+    sim_frames_all = sim.simulate_structure(test_enzyme)
+    ref_MDS_all = sim.get_static_mbs(ref_enzyme)
+    end_sim_time = time.perf_counter()
+    for site1, sim_frames in sim_frames_all.items():
+        for site2, ref_MDS in ref_MDS_all.items():
+
+            rmsd_og = align_point_clouds(sim_frames[0],ref_MDS,config.alignment)
+            rmsd_sim = simulation_alignment(sim_frames,ref_MDS,config.alignment)
+            print()
+            print(f"comparing site {site1} and site {site2}")
+            print(f"original rmsd: {rmsd_og}")
+            print(f"reevaluated rmsd: {rmsd_sim}")
+            print()
+
+
+    end_time = time.perf_counter()
+    sim_time = end_sim_time - start_time
+    comp_time = end_time - end_sim_time
+    tot_time = end_time - start_time
+
+    print("time used: ",tot_time)
+    print("time used for simulation: ", sim_time)
+    print("time used for comparison: ", comp_time)
+
+    amount_of_comparisons = len(ref_MDS_all)*len(sim_frames_all)/2
+    print(f"Total amount of comparisons: {amount_of_comparisons}")

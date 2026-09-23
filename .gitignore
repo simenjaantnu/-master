@@ -2,3 +2,8 @@
 .vscode/
 logs/
 __pycache__
+.env
+.env.*
+*.swp
+src/output/
+src/output_*.txt

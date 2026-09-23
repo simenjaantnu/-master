@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import open3d  # type: ignore[import-untyped]
 from config import config
+import networkx as nx
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -146,6 +147,16 @@ def save_rmsd_density(out_path: Path) -> None:
         range_max=range_max,
     )
 
+def get_mbs_neighbors(
+        network: nx.graph,
+        node: nx.node
+        
+) -> list[MBSPointCloud]:
+    
+    """
+    returns the neigbors of the given node
+    """
+    pass
 
 if __name__ == "__main__":
     out_path = config.directory.analysis / "rmsd_density.npz"

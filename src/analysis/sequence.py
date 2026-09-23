@@ -605,7 +605,7 @@ def main() -> None:
     identify_geometry_conserved_sequence_divergent_pairs(
         edge_dict,
         output_path,
-        rmsd_threshold=0.8,
+        rmsd_threshold=1,
         identity_threshold=25.0,
         normalized_rmsd_threshold=0.375,
     )

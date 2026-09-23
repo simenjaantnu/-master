@@ -168,7 +168,7 @@ if __name__ == "__main__":
     # Add normalized RMSD attribute for visualization (edge attribute).
     for edge in largest_subgraph.edges:
         rmsd = largest_subgraph.edges[edge]["rmsd"]
-        max_rmsd = 0.8
+        max_rmsd = 1
         rmsd_norm = 1 - (rmsd / max_rmsd)
         largest_subgraph.edges[edge]["rmsd_norm"] = rmsd_norm
 

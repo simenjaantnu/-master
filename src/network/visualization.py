@@ -59,7 +59,7 @@ if __name__ == "__main__":
     # Add normalized RMSD attribute for visualization (edge attribute).
     for edge in graph.edges:
         rmsd = graph.edges[edge]["rmsd"]
-        max_rmsd = 0.8
+        max_rmsd = 0.9
         rmsd_norm = 1 - (rmsd / max_rmsd)
         graph.edges[edge]["rmsd_norm"] = rmsd_norm
 

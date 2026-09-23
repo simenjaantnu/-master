@@ -667,10 +667,10 @@ def main() -> None:
 
     # Run enrichment analysis.
     volcano_data_path = config.directory.analysis / "drugs/volcano_data.csv"
-    if not volcano_data_path.exists():
-        df_volcano = drug_enrichment(drug_network, shuffles=10000)
-    else:
-        df_volcano = pd.read_csv(volcano_data_path)
+    #if not volcano_data_path.exists():
+    df_volcano = drug_enrichment(drug_network, shuffles=10000)
+    ##else:
+    #    df_volcano = pd.read_csv(volcano_data_path)
 
     # Find significant over enrichments (adjusted p-value).
     sig_over = df_volcano[

@@ -129,6 +129,14 @@ if __name__ == "__main__":
         (0.9, 1.0),
         (1.0, 1.1),
         (1.1, 1.2),
+        (1.2, 1.3),
+        (1.3, 1.4),
+        (1.4, 1.5),
+        (1.5, 1.6),
+        (1.6, 1.7),
+        (1.7, 1.8),
     ]
-    n_pairs = 1000
+    n_pairs = 10000
     gmm_overlap_areas = bimodal_overlap(ranges, n_pairs)
+    print(gmm_overlap_areas)
+
